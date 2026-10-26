@@ -2,6 +2,10 @@
 
 A small Windows desktop app for merging PDFs. Add files, put them in order, and save them as a single PDF.
 
+<p align="center">
+  <img src="docs/screenshot.png" alt="PDF Joiner window with five PDFs queued">
+</p>
+
 ## Features
 
 - Add PDFs with drag and drop or a file picker
