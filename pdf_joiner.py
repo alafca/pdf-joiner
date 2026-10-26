@@ -12,6 +12,22 @@ except ImportError:
 from pypdf import PdfWriter
 
 
+def move(items, sel, delta):
+    """Shift the selected indices of items by delta in place; return the new selection.
+
+    A row blocked by the list edge, or by a selected row that is itself blocked, stays put.
+    """
+    new_sel = []
+    for i in sorted(sel, reverse=delta > 0):
+        j = i + delta
+        if j < 0 or j >= len(items) or j in new_sel:
+            new_sel.append(i)
+            continue
+        items[i], items[j] = items[j], items[i]
+        new_sel.append(j)
+    return new_sel
+
+
 class PdfJoinerApp:
     def __init__(self, root):
         self.root = root
@@ -72,22 +88,22 @@ class PdfJoinerApp:
         bottom.pack(fill="x")
         self.status = ttk.Label(bottom, text="", foreground="#666")
         self.status.pack(side="left")
-        join_btn = ttk.Button(bottom, text="Join PDFs", command=self._join)
-        join_btn.pack(side="right")
+        ttk.Button(bottom, text="Join PDFs", command=self._join).pack(side="right")
+
+    def _render(self):
+        self.listbox.delete(0, "end")
+        self.listbox.insert("end", *(p.name for p in self.files))
+        self._refresh_status()
 
     def _add_paths(self, paths):
-        added = 0
         for raw in paths:
             p = Path(raw)
-            if p.suffix.lower() != ".pdf" or not p.exists():
+            if p.suffix.lower() != ".pdf" or not p.is_file():
                 continue
             if p in self.files:
                 continue
             self.files.append(p)
-            self.listbox.insert("end", p.name)
-            added += 1
-        self._refresh_status()
-        return added
+        self._render()
 
     def _add_files(self):
         paths = filedialog.askopenfilenames(
@@ -102,35 +118,20 @@ class PdfJoinerApp:
 
     def _remove_selected(self):
         for idx in reversed(self.listbox.curselection()):
-            self.listbox.delete(idx)
             del self.files[idx]
-        self._refresh_status()
+        self._render()
 
     def _move(self, delta):
-        sel = list(self.listbox.curselection())
-        if not sel:
-            return
-        sel.sort(reverse=(delta > 0))
-        new_sel = []
+        sel = move(self.files, self.listbox.curselection(), delta)
+        self._render()
         for i in sel:
-            j = i + delta
-            if j < 0 or j >= len(self.files):
-                new_sel.append(i)
-                continue
-            self.files[i], self.files[j] = self.files[j], self.files[i]
-            self.listbox.delete(i)
-            self.listbox.insert(i, self.files[i].name)
-            self.listbox.delete(j)
-            self.listbox.insert(j, self.files[j].name)
-            new_sel.append(j)
-        self.listbox.selection_clear(0, "end")
-        for i in new_sel:
             self.listbox.selection_set(i)
+        if sel:
+            self.listbox.see(sel[0])
 
     def _clear(self):
         self.files.clear()
-        self.listbox.delete(0, "end")
-        self._refresh_status()
+        self._render()
 
     def _refresh_status(self):
         n = len(self.files)
@@ -151,16 +152,21 @@ class PdfJoinerApp:
 
         self.status.config(text="Merging...")
         self.root.update_idletasks()
+        # Write to a temp file first so a failure never truncates an existing file.
+        tmp = out_path + ".part"
+        current = ""
         try:
             writer = PdfWriter()
             for p in self.files:
+                current = p.name
                 writer.append(str(p))
-            with open(out_path, "wb") as f:
-                writer.write(f)
-            writer.close()
+            current = Path(out_path).name
+            writer.write(tmp)
+            os.replace(tmp, out_path)
         except Exception as e:
-            self.status.config(text="")
-            messagebox.showerror("PDF Joiner", f"Failed to merge:\n{e}")
+            Path(tmp).unlink(missing_ok=True)
+            self._refresh_status()
+            messagebox.showerror("PDF Joiner", f"Failed on {current}:\n{e}")
             return
 
         self.status.config(text="Done.")
@@ -170,8 +176,8 @@ class PdfJoinerApp:
         ):
             try:
                 os.startfile(out_path)
-            except Exception:
-                pass
+            except OSError as e:
+                messagebox.showerror("PDF Joiner", f"Couldn't open the file:\n{e}")
 
 
 def main():
